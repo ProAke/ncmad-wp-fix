@@ -1,0 +1,12 @@
+# Staging settings, backups and site data must stay local.
+.env
+.env.*
+!.env.example
+staging-data/
+*.sql
+*.sql.gz
+*.sql.zst
+*.sql.zip
+*.wpress
+wp-config.php
+wp-content/

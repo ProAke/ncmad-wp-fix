@@ -1,0 +1,86 @@
+name: ncmad-staging
+
+x-wordpress-environment: &wordpress-environment
+  WORDPRESS_DB_HOST: db:3306
+  WORDPRESS_DB_NAME: staging
+  WORDPRESS_DB_USER: staging
+  WORDPRESS_DB_PASSWORD: ${STAGING_DB_PASSWORD:?Run python3 staging/init_env.py first}
+  WORDPRESS_TABLE_PREFIX: ${STAGING_TABLE_PREFIX:-wp_}
+  WORDPRESS_CONFIG_EXTRA: |
+    define( 'WP_HOME', 'http://127.0.0.1:8088' );
+    define( 'WP_SITEURL', 'http://127.0.0.1:8088' );
+    define( 'WP_ENVIRONMENT_TYPE', 'staging' );
+    define( 'DISABLE_WP_CRON', true );
+    define( 'DISALLOW_FILE_EDIT', true );
+    define( 'WP_HTTP_BLOCK_EXTERNAL', true );
+    define( 'WPMU_PLUGIN_DIR', '/opt/staging-mu' );
+
+services:
+  db:
+    image: ${STAGING_DB_IMAGE:-mariadb:10.11}
+    environment:
+      MARIADB_DATABASE: staging
+      MARIADB_USER: staging
+      MARIADB_PASSWORD: ${STAGING_DB_PASSWORD:?Run python3 staging/init_env.py first}
+      MARIADB_ROOT_PASSWORD: ${STAGING_ROOT_PASSWORD:?Run python3 staging/init_env.py first}
+    healthcheck:
+      test: [CMD, healthcheck.sh, --connect, --innodb_initialized]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - database:/var/lib/mysql
+    networks: [isolated]
+
+  wordpress:
+    image: ${STAGING_WP_IMAGE:-wordpress:php8.3-apache}
+    environment: *wordpress-environment
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, php, -r, 'exit(is_file("wp-config.php") && @fsockopen("127.0.0.1", 80) ? 0 : 1);']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - site:/var/www/html
+      - ./staging/mu:/opt/staging-mu:ro
+    networks: [isolated]
+
+  cli:
+    image: ${STAGING_CLI_IMAGE:-wordpress:cli-php8.3}
+    profiles: [tools]
+    user: '33:33'
+    working_dir: /var/www/html
+    environment:
+      <<: *wordpress-environment
+      WP_CLI_CACHE_DIR: /tmp/wp-cli-cache
+    depends_on:
+      wordpress:
+        condition: service_healthy
+    volumes:
+      - site:/var/www/html
+      - ./staging/mu:/opt/staging-mu:ro
+    networks: [isolated]
+
+  gateway:
+    image: nginx:alpine
+    profiles: [browser]
+    depends_on:
+      wordpress:
+        condition: service_healthy
+    ports:
+      - '127.0.0.1:8088:80'
+    volumes:
+      - ./staging/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks: [front, isolated]
+
+networks:
+  front:
+  isolated:
+    internal: true
+
+volumes:
+  database:
+  site:
